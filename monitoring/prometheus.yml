@@ -1,0 +1,49 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'docker-monitoring'
+
+# Alertmanager configuration (optionnel)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+scrape_configs:
+  # Prometheus lui-même
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # PostgreSQL Exporter
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'postgres-db'
+
+  # cAdvisor - Métriques des conteneurs Docker
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Backends Spring Boot (décommenter et adapter)
+  # - job_name: 'backend-service-1'
+  #   metrics_path: '/actuator/prometheus'
+  #   static_configs:
+  #     - targets: ['backend-service-1:8080']
+  #       labels:
+  #         service: 'backend-1'
+  #         environment: 'dev'
+
+  # - job_name: 'backend-service-2'
+  #   metrics_path: '/actuator/prometheus'
+  #   static_configs:
+  #     - targets: ['backend-service-2:8080']
+  #       labels:
+  #         service: 'backend-2'
+  #         environment: 'dev'

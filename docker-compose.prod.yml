@@ -1,0 +1,64 @@
+version: '3.8'
+
+# Configuration pour la production
+# Utiliser avec: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+  postgres:
+    environment:
+      # En production, ces valeurs doivent venir de secrets sécurisés
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  pgadmin:
+    # En production, pgAdmin devrait être derrière un reverse proxy avec SSL
+    environment:
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'True'
+      PGADMIN_CONFIG_LOGIN_BANNER: '"Production Environment - Authorized Access Only"'
+
+  postgres-backup:
+    environment:
+      SCHEDULE: "@every 6h"  # Backup toutes les 6 heures en prod
+      BACKUP_KEEP_DAYS: 30
+      BACKUP_KEEP_WEEKS: 12
+      BACKUP_KEEP_MONTHS: 12
+
+  # backend-service-1:
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: prod
+  #     SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+  #     SPRING_JPA_SHOW_SQL: false
+  #   deploy:
+  #     replicas: 2  # Plusieurs instances pour la haute disponibilité
+  #     resources:
+  #       limits:
+  #         cpus: '2'
+  #         memory: 2G
+  #       reservations:
+  #         cpus: '1'
+  #         memory: 1G
+  #     restart_policy:
+  #       condition: on-failure
+  #       delay: 5s
+  #       max_attempts: 3
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "5"

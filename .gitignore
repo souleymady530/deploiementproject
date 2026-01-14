@@ -1,0 +1,14 @@
+# Fichiers d'environnement
+.env
+
+# Logs Docker
+*.log
+
+# Fichiers temporaires
+*.tmp
+*.swp
+*~
+
+# Données locales (si vous utilisez des volumes locaux)
+data/
+volumes/

@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin pour gérer PostgreSQL
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_SERVER_JSON_FILE: '/pgadmin4/servers.json'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./pgadmin-servers.json:/pgadmin4/servers.json
+    networks:
+      - backend-network
+    depends_on:
+      - postgres
+
+  # Exemple de backend Spring Boot 1
+  # Décommentez et adaptez selon vos besoins
+  # backend-service-1:
+  #   image: votre-image-backend-1:latest
+  #   container_name: backend-service-1
+  #   restart: unless-stopped
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydb
+  #     SPRING_DATASOURCE_USERNAME: postgres
+  #     SPRING_DATASOURCE_PASSWORD: postgres
+  #     SPRING_JPA_HIBERNATE_DDL_AUTO: update
+  #   ports:
+  #     - "8081:8080"
+  #   networks:
+  #     - backend-network
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+  # Exemple de backend Spring Boot 2
+  # backend-service-2:
+  #   image: votre-image-backend-2:latest
+  #   container_name: backend-service-2
+  #   restart: unless-stopped
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydb
+  #     SPRING_DATASOURCE_USERNAME: postgres
+  #     SPRING_DATASOURCE_PASSWORD: postgres
+  #     SPRING_JPA_HIBERNATE_DDL_AUTO: update
+  #   ports:
+  #     - "8082:8080"
+  #   networks:
+  #     - backend-network
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+# Réseau personnalisé pour tous les services backend
+networks:
+  backend-network:
+    driver: bridge
+    name: backend-network
+
+# Volumes pour la persistance des données
+volumes:
+  postgres-data:
+    driver: local
+  pgadmin-data:
+    driver: local
