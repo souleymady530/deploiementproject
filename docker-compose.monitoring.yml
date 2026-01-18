@@ -1,7 +1,7 @@
 version: '3.8'
 
-# Stack de monitoring avec Prometheus et Grafana
-# Utiliser avec: docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+# Stack de surveillance avec Prometheus, Grafana, Loki et Promtail
+# Utiliser avec: docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 services:
   # Prometheus - Collecte des métriques
@@ -16,7 +16,7 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--storage.tsdb.retention.time=30d'
     ports:
-      - "9090:9090"
+      - "9190:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -28,7 +28,7 @@ services:
           cpus: '1'
           memory: 1G
 
-  # Grafana - Visualisation des métriques
+  # Grafana - Visualisation des métriques et logs
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -47,13 +47,14 @@ services:
       - backend-network
     depends_on:
       - prometheus
+      - loki
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 512M
 
-  # PostgreSQL Exporter - Métriques de la base de données
+  # Exporteur PostgreSQL - Métriques de la base de données
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:latest
     container_name: postgres-exporter
@@ -67,13 +68,13 @@ services:
     depends_on:
       - postgres
 
-  # cAdvisor - Métriques des conteneurs
+  # cAdvisor - Métriques des conteneurs Docker
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: cadvisor
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8088:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -87,8 +88,51 @@ services:
           cpus: '0.3'
           memory: 256M
 
+  # Loki - Agrégation et stockage des logs
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - backend-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Promtail - Collecteur de logs pour Loki
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - backend-network
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+
+# Volumes pour la persistance des données
 volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  loki-data:
     driver: local

@@ -2,9 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    monitor: 'docker-monitoring'
+    moniteur: 'monitoring-docker'
 
-# Alertmanager configuration (optionnel)
+# Configuration Alertmanager (optionnel)
 # alerting:
 #   alertmanagers:
 #     - static_configs:
@@ -17,33 +17,41 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # PostgreSQL Exporter
+  # Exporteur PostgreSQL
   - job_name: 'postgres'
     static_configs:
       - targets: ['postgres-exporter:9187']
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
-        replacement: 'postgres-db'
+        replacement: 'base-postgres'
 
   # cAdvisor - Métriques des conteneurs Docker
   - job_name: 'cadvisor'
     static_configs:
       - targets: ['cadvisor:8080']
 
-  # Backends Spring Boot (décommenter et adapter)
-  # - job_name: 'backend-service-1'
-  #   metrics_path: '/actuator/prometheus'
-  #   static_configs:
-  #     - targets: ['backend-service-1:8080']
-  #       labels:
-  #         service: 'backend-1'
-  #         environment: 'dev'
+  # Applications Spring Boot
+  - job_name: 'gestion-app'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['gestion-app:3333']
+        labels:
+          service: 'gestion-app'
+          environnement: 'dev'
 
-  # - job_name: 'backend-service-2'
-  #   metrics_path: '/actuator/prometheus'
-  #   static_configs:
-  #     - targets: ['backend-service-2:8080']
-  #       labels:
-  #         service: 'backend-2'
-  #         environment: 'dev'
+  - job_name: 'nordtext-unified'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['nordtext-unified-container:8080']
+        labels:
+          service: 'nordtext'
+          environnement: 'dev'
+
+  - job_name: 'sgmao-api'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['sgmao-api:9999']
+        labels:
+          service: 'sgmao'
+          environnement: 'dev'
