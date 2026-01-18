@@ -1,0 +1,234 @@
+# =============================================================================
+# CI/CD Backend Spring Boot - Template Forgejo Actions
+# =============================================================================
+# Copiez ce fichier dans votre repo backend: .forgejo/workflows/ci-cd.yml
+# Adaptez les variables SERVICE_NAME et ports selon votre application
+# =============================================================================
+
+name: CI/CD Backend Spring Boot
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  # ============================================
+  # ADAPTER CES VARIABLES A VOTRE APPLICATION
+  # ============================================
+  SERVICE_NAME: backend-gestion  # Nom du service (backend-gestion, backend-nordtext, backend-sgmao)
+  SERVICE_PORT: 8081             # Port expose sur le VPS
+  JAVA_VERSION: '17'
+  REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+  IMAGE_NAME: ${{ secrets.REGISTRY_URL }}/${{ github.repository_owner }}/${{ env.SERVICE_NAME }}
+
+jobs:
+  # ============================================
+  # JOB: Tests
+  # ============================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run tests
+        run: mvn test -B
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: target/surefire-reports/
+
+  # ============================================
+  # JOB: Build & Push Docker Image
+  # ============================================
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build JAR
+        run: mvn package -DskipTests -B
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="latest"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Login to Forgejo Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            JAR_FILE=target/*.jar
+
+  # ============================================
+  # JOB: Deploy to VPS
+  # ============================================
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << DEPLOY_SCRIPT
+            set -e
+            cd ${{ secrets.VPS_DEPLOY_PATH }}/deploiementproject
+
+            echo "=== Deploying ${{ env.SERVICE_NAME }} version: $VERSION ==="
+
+            # Login to registry
+            echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ${{ env.REGISTRY_URL }} -u ${{ github.actor }} --password-stdin
+
+            # Pull new image
+            docker-compose -f docker-compose.yml -f docker-compose.apps.yml pull ${{ env.SERVICE_NAME }}
+
+            # Update and restart service
+            docker-compose -f docker-compose.yml -f docker-compose.apps.yml up -d ${{ env.SERVICE_NAME }}
+
+            # Cleanup
+            docker image prune -f
+
+            echo "=== Deployment completed ==="
+          DEPLOY_SCRIPT
+
+      - name: Health check
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'HEALTH_SCRIPT'
+            set -e
+            echo "=== Waiting for service to be healthy ==="
+            sleep 15
+
+            MAX_RETRIES=30
+            RETRY_COUNT=0
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -sf "http://localhost:${{ env.SERVICE_PORT }}/actuator/health" > /dev/null 2>&1; then
+                echo "Service is healthy!"
+                exit 0
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "Waiting... ($RETRY_COUNT/$MAX_RETRIES)"
+              sleep 2
+            done
+
+            echo "Health check failed after $MAX_RETRIES attempts"
+            exit 1
+          HEALTH_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  # ============================================
+  # JOB: Rollback (manual trigger only)
+  # ============================================
+  rollback:
+    name: Rollback to Previous Version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: production
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rollback service
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ROLLBACK_SCRIPT'
+            set -e
+            cd ${{ secrets.VPS_DEPLOY_PATH }}/deploiementproject
+
+            echo "=== Rolling back ${{ env.SERVICE_NAME }} ==="
+
+            # Get current image
+            CURRENT_IMAGE=$(docker inspect --format='{{.Config.Image}}' ${{ env.SERVICE_NAME }} 2>/dev/null || echo "none")
+            echo "Current image: $CURRENT_IMAGE"
+
+            # Restore from backup if available
+            if [ -f ".env.backup" ]; then
+              cp .env.backup .env
+              docker-compose -f docker-compose.yml -f docker-compose.apps.yml up -d ${{ env.SERVICE_NAME }}
+              echo "Rollback completed from backup"
+            else
+              echo "No backup found, cannot rollback automatically"
+              exit 1
+            fi
+          ROLLBACK_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
